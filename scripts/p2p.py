@@ -9,6 +9,7 @@ June 2019
 
 """
 import configparser
+import json
 import os
 import csv
 import math
@@ -28,13 +29,15 @@ from itmlogic.statistics.avar import avar
 from terrain_module import terrain_p2p
 
 # #set up file paths
-CONFIG = configparser.ConfigParser()
-CONFIG.read(os.path.join(os.path.dirname(__file__), 'script_config.ini'))
-BASE_PATH = CONFIG['file_locations']['base_path']
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_PATH = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+DATA_FOLDER = os.path.join(BASE_PATH, 'data')
+DATA_PROCESSED = os.path.join(DATA_FOLDER, 'processed')
 
-DATA_PROCESSED = os.path.join(BASE_PATH, 'processed')
-RESULTS = os.path.join(BASE_PATH, '..', 'results')
+RESULTS = os.path.join(BASE_PATH, 'results')
 
+DEM_FOLDER = os.path.join(DATA_FOLDER)
+DIRECTORY_SHAPES = os.path.join(DATA_PROCESSED, 'shapes')
 
 def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
     """
@@ -74,10 +77,12 @@ def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
 
     #DEFINE STATISTICAL PARAMETERS
     # Confidence  levels for predictions
-    qc = [50, 90, 10]
+    # qc = [50, 90, 10]
+    qc = [50]
 
     # Reliability levels for predictions
-    qr = [1, 10, 50, 90, 99]
+    # qr = [1, 10, 50, 90, 99]
+    qr = [50]
 
     # Number of points describing profile -1
     pfl = []
@@ -205,14 +210,14 @@ def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
     print('Estimated quantiles of basic transmission loss (db)')
     print('Free space value {} db'.format(str(fs)))
 
-    print('Confidence levels {}, {}, {}'.format(
-        str(qc[0]), str(qc[1]), str(qc[2])))
+    # print('Confidence levels {}, {}, {}'.format(
+    #     str(qc[0]), str(qc[1]), str(qc[2])))
 
-    # Confidence  levels for predictions
-    qc = [50, 90, 10]
-
-    # Reliability levels for predictions
-    qr = [1, 10, 50, 90, 99]
+    # # Confidence  levels for predictions
+    # qc = [50, 90, 10]
+    #
+    # # Reliability levels for predictions
+    # qr = [1, 10, 50, 90, 99]
 
     output = []
     for jr in range(0, (nr)):
@@ -342,11 +347,6 @@ def straight_line_from_points(a, b):
 
 
 if __name__ == '__main__':
-
-    #Setup data folder paths
-    dem_folder = os.path.join(BASE_PATH)
-    directory_shapes = os.path.join(DATA_PROCESSED, 'shapes')
-
     #Set coordinate reference systems
     old_crs = 'EPSG:4326'
     # new_crs = 'EPSG:3857'
@@ -357,10 +357,10 @@ if __name__ == '__main__':
 
     #Define radio operating frequency (MHz)
     # main_user_defined_parameters['fmhz'] = 573.3
-    main_user_defined_parameters['fmhz']  =  41.5
+    main_user_defined_parameters['fmhz']  =  12450.0
 
-    #Define distance between terminals in km (from Longley Rice docs)
-    main_user_defined_parameters['d'] = 77.8
+    # #Define distance between terminals in km (from Longley Rice docs)
+    # main_user_defined_parameters['d'] = 77.57
 
     #Define antenna heights - Antenna 1 height (m) # Antenna 2 height (m)
     main_user_defined_parameters['hg'] = [143.9, 8.5]
@@ -407,36 +407,23 @@ if __name__ == '__main__':
         }
     }
 
-    #Create new geojson for terrain path
-    line = straight_line_from_points(transmitter, receiver)
+    # Load the receiver data from the JSON file
+    with open('receivers.json', 'r') as f:
+        receivers = json.load(f)
 
-    #Run terrain module
-    measured_terrain_profile, distance_km, points = terrain_p2p(
-        os.path.join(dem_folder, 'ASTGTM2_N51W001_dem.tif'), line)
-    print('Distance is {}km'.format(distance_km))
+    dem_string = os.path.join(DEM_FOLDER, 'Copernicus_DSM_30_N51_00_W001_00_DEM.tif')
 
-    #Check (out of interest) how many measurements are in each profile
-    print('len(measured_terrain_profile) {}'.format(len(measured_terrain_profile)))
-    print('len(original_surface_profile_m) {}'.format(len(original_surface_profile_m)))
+    output = []
+    # Iterate over each receiver
+    for receiver in receivers[:10]:
+        line = straight_line_from_points(transmitter, receiver)
 
-    #Run model and get output
-    output = itmlogic_p2p(main_user_defined_parameters, original_surface_profile_m)
+        #Run terrain module
+        measured_terrain_profile, distance_km, points = terrain_p2p(dem_string, line)
+        main_user_defined_parameters['d'] = distance_km
 
-    #Grab coordinates for transmitter and receiver for writing to .csv
-    transmitter_x = transmitter['geometry']['coordinates'][0]
-    transmitter_y = transmitter['geometry']['coordinates'][1]
-    receiver_x = receiver['geometry']['coordinates'][0]
-    receiver_y = receiver['geometry']['coordinates'][1]
-
-    transmitter_shape = []
-    transmitter_shape.append(transmitter)
-    write_shapefile(transmitter_shape, directory_shapes, 'transmitter.shp', old_crs)
-
-    receiver_shape = []
-    receiver_shape.append(receiver)
-    write_shapefile(receiver_shape, directory_shapes, 'receiver.shp', old_crs)
-
-    write_shapefile(points, directory_shapes, 'points.shp', old_crs)
+        #Run model and get output
+        output.extend(itmlogic_p2p(main_user_defined_parameters, measured_terrain_profile))
 
     #Write results to .csv
     csv_writer(output, RESULTS, 'p2p_results.csv')
