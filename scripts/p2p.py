@@ -196,19 +196,19 @@ def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
 
     #Report dominant propagation type predicted by model according to parameters
     #obtained from qlrpfl
-    if q < 0:
-        print('Line of sight path')
-    elif q == 0:
-        print('Single horizon path')
-    else:
-        print('Double-horizon path')
-    if prop['dist'] <= prop['dlsa']:
-        print('Diffraction is the dominant mode')
-    elif prop['dist'] > prop['dx']:
-        print('Tropospheric scatter is the dominant mode')
-
-    print('Estimated quantiles of basic transmission loss (db)')
-    print('Free space value {} db'.format(str(fs)))
+    # if q < 0:
+    #     print('Line of sight path')
+    # elif q == 0:
+    #     print('Single horizon path')
+    # else:
+    #     print('Double-horizon path')
+    # if prop['dist'] <= prop['dlsa']:
+    #     print('Diffraction is the dominant mode')
+    # elif prop['dist'] > prop['dx']:
+    #     print('Tropospheric scatter is the dominant mode')
+    #
+    # print('Estimated quantiles of basic transmission loss (db)')
+    # print('Free space value {} db'.format(str(fs)))
 
     # print('Confidence levels {}, {}, {}'.format(
     #     str(qc[0]), str(qc[1]), str(qc[2])))
