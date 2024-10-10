@@ -13,7 +13,10 @@ import json
 import os
 import csv
 import math
+import pickle
 import time
+
+from create_random import *
 
 import numpy as np
 from functools import partial
@@ -25,13 +28,14 @@ from fiona.crs import from_epsg
 from pyproj import Transformer
 from rasterio.warp import Resampling
 from rasterio.warp import calculate_default_transform, reproject
+from shapely import Point
 from shapely.geometry import LineString, mapping
 from shapely.ops import transform
 
 from itmlogic.misc.qerfi import qerfi
 from itmlogic.preparatory_subroutines.qlrpfl import qlrpfl
 from itmlogic.statistics.avar import avar
-from terrain_module import terrain_p2p
+from terrain_module import terrain_p2p, terrain_p2p_wgs, terrain_p2p_linear
 
 # #set up file paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,10 +49,11 @@ DEM_FOLDER = os.path.join(DATA_FOLDER)
 DIRECTORY_SHAPES = os.path.join(DATA_PROCESSED, 'shapes')
 
 
-def reproject_crs(input_file):
+
+def reproject_crs(input_file, target_crs):
     # Open the source file (in WGS84, EPSG:4326)
-    target_crs = 'EPSG:27700'
     with rasterio.open(input_file) as src:
+    # with rasterio.open(input_file) as src:
         # Calculate the transform and dimensions for the new projection
         transform, width, height = calculate_default_transform(
             src.crs, target_crs, src.width, src.height, *src.bounds
@@ -76,7 +81,7 @@ def reproject_crs(input_file):
             dst_crs=target_crs,
             resampling=Resampling.nearest
         )
-        return data_reprojected
+        return data_reprojected, transform
 
 
 def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
@@ -303,49 +308,6 @@ def csv_writer(data, directory, filename):
         writer.writerows(data)
 
 
-def write_shapefile(data, directory, filename, crs):
-    """
-    Write geojson data to shapefile.
-
-    Parameters
-    ----------
-    data : list of dicts
-        Data to be written.
-    directory : string
-        Folder to write the results to.
-    filename : string
-        Name of the file to write.
-    crs : string
-        Defines the coordinate reference system.
-
-    """
-    prop_schema = []
-    for name, value in data[0]['properties'].items():
-        fiona_prop_type = next((
-            fiona_type for fiona_type, python_type in \
-                fiona.FIELD_TYPES_MAP.items() if \
-                python_type == type(value)), None
-            )
-
-        prop_schema.append((name, fiona_prop_type))
-
-    sink_driver = 'ESRI Shapefile'
-    sink_crs = {'init': crs}
-    sink_schema = {
-        'geometry': data[0]['geometry']['type'],
-        'properties': OrderedDict(prop_schema)
-    }
-
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-    with fiona.open(
-        os.path.join(directory, filename), 'w',
-        driver=sink_driver, crs=sink_crs, schema=sink_schema) as sink:
-        for datum in data:
-            sink.write(datum)
-
-
 def straight_line_from_points(a, b):
     """
     Generate a geojson LineString object from two geojson points.
@@ -389,23 +351,10 @@ def straight_line_from_points(a, b):
 if __name__ == '__main__':
     #Set coordinate reference systems
     old_crs = 'EPSG:4326'
-    # new_crs = 'EPSG:3857'
 
-    #DEFINE MAIN USER PARAMETERS
-    #Define an empty dict for user defined parameters
     main_user_defined_parameters = {}
-
-    #Define radio operating frequency (MHz)
-    # main_user_defined_parameters['fmhz'] = 573.3
     main_user_defined_parameters['fmhz']  =  12450.0
-
-    # #Define distance between terminals in km (from Longley Rice docs)
-    # main_user_defined_parameters['d'] = 77.57
-
-    #Define antenna heights - Antenna 1 height (m) # Antenna 2 height (m)
     main_user_defined_parameters['hg'] = [143.9, 8.5]
-
-    #Polarization selection (0=horizontal, 1=vertical)
     main_user_defined_parameters['ipol'] = 0
 
     #Create new geojson for Crystal Palace radio transmitter
@@ -420,39 +369,52 @@ if __name__ == '__main__':
         }
     }
 
-    #Create new geojson for Mursley
-    receiver = {
-        'type': 'Feature',
-        'geometry': {
-            'type': 'Point',
-            'coordinates': (-0.8119433954872186, 51.94972494521946)
-        },
-        'properties': {
-            'id': 'Mursley'
-        }
-    }
+    transmitter_point = Point(-0.07491679518573545, 51.42413477117786)
+    transmitter_point_linear = Point(533941.9879948243, 171216.04150133877)
 
     # Load the receiver data from the JSON file
     with open('receivers.json', 'r') as f:
-        receivers = json.load(f)
+        receivers_json = json.load(f)
 
-    start_time = time.time()  # Start the timer
+    with open("receivers.pkl", 'rb') as f:
+        receivers = pickle.load(f)
+
+    print(receivers.json[0])
+    print(receivers.wgs[0])
+    print(receivers.linear[0])
 
     dem_string = os.path.join(DEM_FOLDER, 'Copernicus_DSM_30_N51_00_W001_00_DEM.tif')
-    dem = reproject_crs(dem_string)
-
+    dem_wgs, transform_wgs = reproject_crs(dem_string, 'EPSG:4326')
+    dem_linear, transform_linear = reproject_crs(dem_string, 'EPSG:27700')
 
     output = []
     # Iterate over each receiver
-    for receiver in receivers[:10]:
-        line = straight_line_from_points(transmitter, receiver)
+    for i in range(10):
+        line = straight_line_from_points(transmitter, receivers.json[i])
 
-        #Run terrain module
-        measured_terrain_profile, distance_km, points = terrain_p2p(dem, line)
+        #Run terrain modules
+        start_time = time.time()
+        measured_terrain_profile, distance_km, _ = terrain_p2p(dem_string, line)
+        print(f"terrain_old took {time.time() - start_time} seconds")
+
+        start_time = time.time()
+        measured_terrain_profile_wgs, distance_km_wgs, _ = terrain_p2p_wgs(dem_wgs, transform_wgs, transmitter_point, receivers.wgs[i])
+        print(f"terrain_new took {time.time() - start_time} seconds")
+
+        start_time = time.time()
+        measured_terrain_profile_linear, distance_km_linear, _ = terrain_p2p_linear(dem_linear, transform_linear, transmitter_point_linear, receivers.linear[i])
+        print(f"terrain_linear took {time.time() - start_time} seconds")
+
         main_user_defined_parameters['d'] = distance_km
 
         #Run model and get output
         output.extend(itmlogic_p2p(main_user_defined_parameters, measured_terrain_profile))
+        output.extend(itmlogic_p2p(main_user_defined_parameters, measured_terrain_profile_wgs))
+
+        start_time = time.time()
+        output.extend(itmlogic_p2p(main_user_defined_parameters, measured_terrain_profile_linear))
+        print(f"itmlogic_p2p took {time.time() - start_time} seconds")
+        output.append({})
 
     #Write results to .csv
     csv_writer(output, RESULTS, 'p2p_results.csv')

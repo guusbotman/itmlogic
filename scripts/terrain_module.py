@@ -128,6 +128,90 @@ def all_data(x):
     return data[data > 0]
 
 
+def terrain_p2p_linear(dem, affine, point1, point2):
+    """
+    This version assumes the coordinates are in a projected (linear) CRS ,
+    so we use Euclidean distance between the two points.
+
+    Parameters
+    ----------
+    dem : array-like
+        Linearized DEM data.
+    point1 : shapely.geometry.Point
+        The starting point (Shapely point).
+    point2 : shapely.geometry.Point
+        The ending point (Shapely point).
+
+    Returns
+    -------
+    surface_profile : list
+        The surface profile measurements in meters.
+    distance_km : float
+        Euclidean distance between the two points in kilometers.
+    points : list
+        Sampled points (Shapely points) between the two locations.
+    """
+
+    # Calculate Euclidean distance between point1 and point2 in meters
+    distance_m = point1.distance(point2)
+
+    distance_km = distance_m / 1000  # Convert to kilometers
+
+    # Interpolate num_samples points directly between point1 and point2
+    num_samples = determine_num_samples(distance_m)  # Assuming this function is defined
+    x_coords = np.linspace(point1.x, point2.x, num_samples)
+    y_coords = np.linspace(point1.y, point2.y, num_samples)
+    sampled_points = [Point(x, y) for x, y in zip(x_coords, y_coords)]
+
+    # Sample elevation profile from DEM (assuming point_query handles sampling)
+    surface_profile = point_query(sampled_points, dem, affine=affine)
+
+    return surface_profile, distance_km, sampled_points
+
+
+def terrain_p2p_wgs(dem, affine, point1, point2):
+    """
+    This version assumes the coordinates are in a projected (linear) CRS ,
+    so we use Euclidean distance between the two points.
+
+    Parameters
+    ----------
+    dem : array-like
+        Linearized DEM data.
+    point1 : shapely.geometry.Point
+        The starting point (Shapely point).
+    point2 : shapely.geometry.Point
+        The ending point (Shapely point).
+
+    Returns
+    -------
+    surface_profile : list
+        The surface profile measurements in meters.
+    distance_km : float
+        Euclidean distance between the two points in kilometers.
+    points : list
+        Sampled points (Shapely points) between the two locations.
+    """
+    geod = pyproj.Geod(ellps="WGS84")
+    distance_m = geod.inv(point1.x, point1.y, point2.x, point2.y)[2]
+
+    # Calculate Euclidean distance between point1 and point2 in meters
+    # distance_m = point1.distance(point2)
+
+    distance_km = distance_m / 1000  # Convert to kilometers
+
+    # Interpolate num_samples points directly between point1 and point2
+    num_samples = determine_num_samples(distance_m)  # Assuming this function is defined
+    x_coords = np.linspace(point1.x, point2.x, num_samples)
+    y_coords = np.linspace(point1.y, point2.y, num_samples)
+    sampled_points = [Point(x, y) for x, y in zip(x_coords, y_coords)]
+
+    # Sample elevation profile from DEM (assuming point_query handles sampling)
+    surface_profile = point_query(sampled_points, dem, affine=affine)
+
+    return surface_profile, distance_km, sampled_points
+
+
 def terrain_p2p(dem, line):
     """
     This module takes a set of point coordinates and returns
@@ -178,6 +262,7 @@ def terrain_p2p(dem, line):
         }
         for point, z in zip(point_geoms, surface_profile)
     ]
+
     return surface_profile, distance_km, points
 
 
