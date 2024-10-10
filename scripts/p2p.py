@@ -13,13 +13,18 @@ import json
 import os
 import csv
 import math
+import time
+
 import numpy as np
 from functools import partial
 from collections import OrderedDict
 
 import fiona
+import rasterio
 from fiona.crs import from_epsg
 from pyproj import Transformer
+from rasterio.warp import Resampling
+from rasterio.warp import calculate_default_transform, reproject
 from shapely.geometry import LineString, mapping
 from shapely.ops import transform
 
@@ -38,6 +43,41 @@ RESULTS = os.path.join(BASE_PATH, 'results')
 
 DEM_FOLDER = os.path.join(DATA_FOLDER)
 DIRECTORY_SHAPES = os.path.join(DATA_PROCESSED, 'shapes')
+
+
+def reproject_crs(input_file):
+    # Open the source file (in WGS84, EPSG:4326)
+    target_crs = 'EPSG:27700'
+    with rasterio.open(input_file) as src:
+        # Calculate the transform and dimensions for the new projection
+        transform, width, height = calculate_default_transform(
+            src.crs, target_crs, src.width, src.height, *src.bounds
+        )
+
+        # Define metadata for the reprojected file
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': target_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+
+        # Create a new array to hold the reprojected data
+        data_reprojected = np.empty((height, width), dtype=src.meta['dtype'])
+
+        # Reproject the data
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=data_reprojected,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=transform,
+            dst_crs=target_crs,
+            resampling=Resampling.nearest
+        )
+        return data_reprojected
+
 
 def itmlogic_p2p(main_user_defined_parameters, surface_profile_m):
     """
@@ -368,21 +408,6 @@ if __name__ == '__main__':
     #Polarization selection (0=horizontal, 1=vertical)
     main_user_defined_parameters['ipol'] = 0
 
-    #Original surface profile from Longley Rice docs
-    original_surface_profile_m = [
-        96,  84,  65,  46,  46,  46,  61,  41,  33,  27,  23,  19,  15,  15,  15,
-        15,  15,  15,  15,  15,  15,  15,  15,  15,  17,  19,  21,  23,  25,  27,
-        29,  35,  46,  41,  35,  30,  33,  35,  37,  40,  35,  30,  51,  62,  76,
-        46,  46,  46,  46,  46,  46,  50,  56,  67, 106,  83,  95, 112, 137, 137,
-        76, 103, 122, 122,  83,  71,  61,  64,  67,  71,  74,  77,  79,  86,  91,
-        83,  76,  68,  63,  76, 107, 107, 107, 119, 127, 133, 135, 137, 142, 148,
-        152, 152, 107, 137, 104,  91,  99, 120, 152, 152, 137, 168, 168, 122, 137,
-        137, 170, 183, 183, 187, 194, 201, 192, 152, 152, 166, 177, 198, 156, 127,
-        116, 107, 104, 101,  98,  95, 103,  91,  97, 102, 107, 107, 107, 103,  98,
-        94,  91, 105, 122, 122, 122, 122, 122, 137, 137, 137, 137, 137, 137, 137,
-        137, 140, 144, 147, 150, 152, 159
-    ]
-
     #Create new geojson for Crystal Palace radio transmitter
     transmitter = {
         'type': 'Feature',
@@ -411,7 +436,11 @@ if __name__ == '__main__':
     with open('receivers.json', 'r') as f:
         receivers = json.load(f)
 
+    start_time = time.time()  # Start the timer
+
     dem_string = os.path.join(DEM_FOLDER, 'Copernicus_DSM_30_N51_00_W001_00_DEM.tif')
+    dem = reproject_crs(dem_string)
+
 
     output = []
     # Iterate over each receiver
@@ -419,7 +448,7 @@ if __name__ == '__main__':
         line = straight_line_from_points(transmitter, receiver)
 
         #Run terrain module
-        measured_terrain_profile, distance_km, points = terrain_p2p(dem_string, line)
+        measured_terrain_profile, distance_km, points = terrain_p2p(dem, line)
         main_user_defined_parameters['d'] = distance_km
 
         #Run model and get output
@@ -428,4 +457,5 @@ if __name__ == '__main__':
     #Write results to .csv
     csv_writer(output, RESULTS, 'p2p_results.csv')
 
-    print('Completed run')
+
+    print(f'Completed run in {time.time() - start_time}')
